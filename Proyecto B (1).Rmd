@@ -1,0 +1,1870 @@
+---
+title: "Proyecto B. Índice de bondad de ajuste geométrico para datos simbólicos de tipo intervalo."
+author: "Dylan Benavides - CeNAT."
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    theme: cosmo
+    highlight: tango
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+# Librerías.
+
+```{r}
+library(spatgeom)
+library(RSDA)
+library(dplyr)
+library(sf)
+library(ggplot2)
+library(readr)
+library(plotly)
+library(pracma)
+```
+
+# Ejemplo 1. Datos simulados, modelo lineal.
+
+```{r}
+n=100
+
+x1.lower <- round(runif(n,0,2),2)
+x1.upper <- x1.lower + round(runif(n,1,2))
+
+x2.lower <- round(runif(n,0,2),2)
+x2.upper <- x2.lower + round(runif(n,1,2))
+
+x3.lower <- round(runif(n,0,2),2)
+x3.upper <- x3.lower + round(runif(n,1,2))
+
+x1.centers <- (x1.lower+x1.upper)/2
+x2.centers <- (x2.lower+x2.upper)/2
+x3.centers <- (x3.lower+x3.upper)/2
+
+x1.ranks <- (x1.upper-x1.lower)/2
+x2.ranks <- (x2.upper-x2.lower)/2
+x3.ranks <- (x3.upper-x3.lower)/2
+
+y.centers <- 0.6*x1.centers + 0.3*x2.centers + 0.1*x3.centers
+y.ranks <- 0.6*x1.ranks + 0.3*x2.ranks + 0.1*x3.ranks
+
+y.lower <- y.centers - y.ranks
+y.upper <- y.centers + y.ranks
+
+tabla <- data.frame(x1.lower,x1.upper,x2.lower,x2.upper,x3.lower,x3.upper,y.lower,y.upper, x1.centers, x1.ranks,x2.centers,x2.ranks,x3.centers,x3.ranks, y.centers, y.ranks)
+
+#Gráficamente
+
+library(patchwork)  
+
+# Rectángulos (x1, y)
+p1 <- ggplot(tabla, aes(xmin = x1.lower, xmax = x1.upper, ymin = y.lower, ymax = y.upper)) +
+  geom_rect(fill = "skyblue", color = "black", alpha = 0.4) +
+  geom_point(aes(x = x1.centers, y = y.centers), color = "red", size = 1) +
+  labs(title = "Rectángulos en el plano (x1, y)", x = "x1", y = "y") +
+  theme_minimal()
+
+# (x2, y)
+p2 <- ggplot(tabla, aes(xmin = x2.lower, xmax = x2.upper, ymin = y.lower, ymax = y.upper)) +
+  geom_rect(fill = "palegreen", color = "black", alpha = 0.4) +
+  geom_point(aes(x = x2.centers, y = y.centers), color = "red", size = 1) +
+  labs(title = "Rectángulos en el plano (x2, y)", x = "x2", y = "y") +
+  theme_minimal()
+
+# (x3, y)
+p3 <- ggplot(tabla, aes(xmin = x3.lower, xmax = x3.upper, ymin = y.lower, ymax = y.upper)) +
+  geom_rect(fill = "salmon", color = "black", alpha = 0.4) +
+  geom_point(aes(x = x3.centers, y = y.centers), color = "red", size = 1) +
+  labs(title = "Rectángulos en el plano (x3, y)", x = "x3", y = "y") +
+  theme_minimal()
+
+p1
+p2
+p3
+```
+
+```{r}
+indice1 <- spatgeom(y=tabla$y.centers, x=tabla[,c("x1.centers","x2.centers","x3.centers")]) 
+plot_curve(indice1, type = "curve")
+plot_curve(indice1, type = "deriv")
+```
+
+```{r}
+indice2 <- spatgeom(y=tabla$y.lower, x=tabla[,c("x1.lower","x2.lower","x3.lower")]) 
+plot_curve(indice2, type = "curve")
+plot_curve(indice2, type = "deriv")
+```
+
+```{r}
+indice3 <- spatgeom(y=tabla$y.upper, x=tabla[,c("x1.upper","x2.upper","x3.upper")]) 
+plot_curve(indice3, type = "curve")
+plot_curve(indice3, type = "deriv")
+```
+
+# Para la variable $x_{1}$.
+
+```{r}
+geom_indicesc <- indice1$results[[1]]$geom_indices 
+geom_indicescmenosr <- indice2$results[[1]]$geom_indices
+geom_indicescmasr <- indice3$results[[1]]$geom_indices
+
+geom_indicescmenosr1 <- geom_indicescmenosr %>% group_by(alpha) %>% filter(geom_corr==max(geom_corr)) %>% ungroup() 
+
+geom_indicescmasr1 <- geom_indicescmasr %>% group_by(alpha) %>% filter(geom_corr==max(geom_corr)) %>% ungroup() 
+
+geom_indicesc$label <- "centros"
+geom_indicescmenosr$label <- "centros menos rangos"
+geom_indicescmasr$label <- "centros más rangos"
+
+data_combined <- rbind(geom_indicesc,geom_indicescmenosr,geom_indicescmasr)
+data_combined1 <- rbind(geom_indicescmenosr1, geom_indicescmasr1)
+data_combined1 <- rbind(c(0,1),data_combined1)
+
+ggplotly(ggplot(data_combined, aes(x = alpha, y = geom_corr, color = label)) +
+  geom_step(size = 1) +
+  labs(
+    title = "Correlación geométrica con datos uniformes",
+    x = "Alpha",
+    y = "Geom_corr",
+    color = "Curvas"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom"))
+
+#Área acumulada entre las curvas: centros menos rangos y centros más rangos.
+
+library(pracma)
+
+alpha.vals <- sort(unique(c(geom_indicescmenosr1$alpha, geom_indicescmasr1$alpha)))
+
+geom_corr.cmasr <- approx(geom_indicescmasr1$alpha, geom_indicescmasr1$geom_corr, xout = alpha.vals, rule = 2)$y
+
+geom_corr.cmenosr <- approx(geom_indicescmenosr1$alpha, geom_indicescmenosr1$geom_corr, xout = alpha.vals, rule = 2)$y
+
+diff.geom_corr <- geom_corr.cmasr - geom_corr.cmenosr
+
+table.cmasr <- cbind(alpha.vals, geom_corr.cmasr)
+table.cmenosr <- cbind(alpha.vals, geom_corr.cmenosr)
+table.diff <- cbind(alpha.vals, diff.geom_corr)
+table.diff
+
+ggplot(table.diff, aes(x=alpha.vals, diff.geom_corr))+geom_point()
+
+area.acumulada <- cumsum(c(0, diff.geom_corr[-1] * diff(alpha.vals))) 
+area.acumulada #analizar esto
+
+data.acumulada <- data.frame(alpha = alpha.vals, area = area.acumulada)
+head(data.acumulada)
+
+p <- ggplot(data.acumulada, aes(x = alpha, y = area.acumulada)) +
+  geom_line(size = 1, color = "blue") +
+  labs(
+    title = "Área Acumulada entre las Curvas",
+    x = "Alpha",
+    y = "Área Acumulada"
+  ) +
+  theme_minimal()
+
+ ggplotly(p)
+
+# Derivada.
+
+tasa.cambio <- diff(area.acumulada) / diff(alpha.vals)
+alpha.medios <- (alpha.vals[-1] + alpha.vals[-length(alpha.vals)])/2
+data.derivada <- data.frame(alpha = alpha.medios, tasadecambio = tasa.cambio)
+
+p.derivada <- ggplot(data.derivada, aes(x = alpha, y = tasa.cambio)) +
+  geom_line(size = 1, color = "red") +
+  labs(
+    title = "Tasa de Cambio de la Función Acumulada",
+    x = "Alpha",
+    y = "Derivada (Tasa de Cambio)"
+  ) +
+  theme_minimal()
+
+ggplotly(p.derivada)
+```
+
+# Para la variable $x_{2}$.
+
+```{r}
+geom_indicesc <- indice1$results[[2]]$geom_indices 
+geom_indicescmenosr <- indice2$results[[2]]$geom_indices
+geom_indicescmasr <- indice3$results[[2]]$geom_indices
+
+geom_indicescmenosr2 <- geom_indicescmenosr %>% group_by(alpha) %>% filter(geom_corr==max(geom_corr)) %>% ungroup() 
+
+geom_indicescmasr2 <- geom_indicescmasr %>% group_by(alpha) %>% filter(geom_corr==max(geom_corr)) %>% ungroup() 
+
+geom_indicesc$label <- "centros"
+geom_indicescmenosr$label <- "centros menos rangos"
+geom_indicescmasr$label <- "centros más rangos"
+
+data_combined <- rbind(geom_indicesc,geom_indicescmenosr,geom_indicescmasr)
+data_combined1 <- rbind(geom_indicescmenosr2, geom_indicescmasr2)
+data_combined1 <- rbind(c(0,1),data_combined1)
+
+ggplotly(ggplot(data_combined, aes(x = alpha, y = geom_corr, color = label)) +
+  geom_step(size = 1) +
+  labs(
+    title = "Correlación geométrica con datos uniformes",
+    x = "Alpha",
+    y = "Geom_corr",
+    color = "Curvas"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom"))
+
+
+alpha.vals <- sort(unique(c(geom_indicescmenosr2$alpha, geom_indicescmasr2$alpha)))
+geom_corr.cmasr <- approx(geom_indicescmasr2$alpha, geom_indicescmasr2$geom_corr, xout = alpha.vals, rule = 2)$y
+geom_corr.cmenosr <- approx(geom_indicescmenosr2$alpha, geom_indicescmenosr2$geom_corr, xout = alpha.vals, rule = 2)$y
+
+diff.geom_corr <- geom_corr.cmasr - geom_corr.cmenosr
+
+table.cmasr <- cbind(alpha.vals, geom_corr.cmasr)
+table.cmenosr <- cbind(alpha.vals, geom_corr.cmenosr)
+table.diff <- cbind(alpha.vals, diff.geom_corr)
+table.diff
+
+ggplot(table.diff, aes(x=alpha.vals, diff.geom_corr))+geom_point()
+
+area.acumulada <- cumsum(c(0, diff.geom_corr[-1] * diff(alpha.vals))) 
+area.acumulada #analizar esto
+
+data.acumulada <- data.frame(alpha = alpha.vals, area = area.acumulada)
+head(data.acumulada)
+
+p <- ggplot(data.acumulada, aes(x = alpha, y = area.acumulada)) +
+  geom_line(size = 1, color = "blue") +
+  labs(
+    title = "Área Acumulada entre las Curvas",
+    x = "Alpha",
+    y = "Área Acumulada"
+  ) +
+  theme_minimal()
+
+ ggplotly(p)
+
+# Derivada.
+
+tasa.cambio <- diff(area.acumulada) / diff(alpha.vals)
+alpha.medios <- (alpha.vals[-1] + alpha.vals[-length(alpha.vals)])/2
+data.derivada <- data.frame(alpha = alpha.medios, tasadecambio = tasa.cambio)
+
+p.derivada <- ggplot(data.derivada, aes(x = alpha, y = tasa.cambio)) +
+  geom_line(size = 1, color = "red") +
+  labs(
+    title = "Tasa de Cambio de la Función Acumulada",
+    x = "Alpha",
+    y = "Derivada (Tasa de Cambio)"
+  ) +
+  theme_minimal()
+
+ggplotly(p.derivada)
+```
+
+# Para la variable $x_{3}$.
+
+```{r}
+geom_indicesc <- indice1$results[[3]]$geom_indices 
+geom_indicescmenosr <- indice2$results[[3]]$geom_indices
+geom_indicescmasr <- indice3$results[[3]]$geom_indices
+
+geom_indicescmenosr3 <- geom_indicescmenosr %>% group_by(alpha) %>% filter(geom_corr==max(geom_corr)) %>% ungroup() 
+
+geom_indicescmasr3 <- geom_indicescmasr %>% group_by(alpha) %>% filter(geom_corr==max(geom_corr)) %>% ungroup() 
+
+geom_indicesc$label <- "centros"
+geom_indicescmenosr$label <- "centros menos rangos"
+geom_indicescmasr$label <- "centros más rangos"
+
+data_combined <- rbind(geom_indicesc,geom_indicescmenosr,geom_indicescmasr)
+data_combined1 <- rbind(geom_indicescmenosr3, geom_indicescmasr3)
+data_combined1 <- rbind(c(0,1),data_combined1)
+
+ggplotly(ggplot(data_combined, aes(x = alpha, y = geom_corr, color = label)) +
+  geom_step(size = 1) +
+  labs(
+    title = "Correlación geométrica con datos uniformes",
+    x = "Alpha",
+    y = "Geom_corr",
+    color = "Curvas"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom"))
+
+
+alpha.vals <- sort(unique(c(geom_indicescmenosr3$alpha, geom_indicescmasr3$alpha)))
+geom_corr.cmasr <- approx(geom_indicescmasr3$alpha, geom_indicescmasr3$geom_corr, xout = alpha.vals, rule = 2)$y
+geom_corr.cmenosr <- approx(geom_indicescmenosr3$alpha, geom_indicescmenosr3$geom_corr, xout = alpha.vals, rule = 2)$y
+
+diff.geom_corr <- geom_corr.cmasr - geom_corr.cmenosr
+
+table.cmasr <- cbind(alpha.vals, geom_corr.cmasr)
+table.cmenosr <- cbind(alpha.vals, geom_corr.cmenosr)
+table.diff <- cbind(alpha.vals, diff.geom_corr)
+table.diff
+
+ggplot(table.diff, aes(x=alpha.vals, diff.geom_corr))+geom_point()
+
+area.acumulada <- cumsum(c(0, diff.geom_corr[-1] * diff(alpha.vals))) 
+area.acumulada #analizar esto
+
+data.acumulada <- data.frame(alpha = alpha.vals, area = area.acumulada)
+head(data.acumulada)
+
+p <- ggplot(data.acumulada, aes(x = alpha, y = area.acumulada)) +
+  geom_line(size = 1, color = "blue") +
+  labs(
+    title = "Área Acumulada entre las Curvas",
+    x = "Alpha",
+    y = "Área Acumulada"
+  ) +
+  theme_minimal()
+
+ ggplotly(p)
+
+# Derivada.
+
+tasa.cambio <- diff(area.acumulada) / diff(alpha.vals)
+alpha.medios <- (alpha.vals[-1] + alpha.vals[-length(alpha.vals)])/2
+data.derivada <- data.frame(alpha = alpha.medios, tasadecambio = tasa.cambio)
+
+p.derivada <- ggplot(data.derivada, aes(x = alpha, y = tasa.cambio)) +
+  geom_line(size = 1, color = "red") +
+  labs(
+    title = "Tasa de Cambio de la Función Acumulada",
+    x = "Alpha",
+    y = "Derivada (Tasa de Cambio)"
+  ) +
+  theme_minimal()
+
+ggplotly(p.derivada)
+``` 
+
+# Ejemplo 2. Modelo de círculos concéntricos con agujeros.
+
+```{r}
+n=100
+
+cita <- round(runif(n, 0, 2*pi),2)
+
+r1 <- round(runif(n, 3,4),2)
+x1.center <- r1*cos(cita)
+y1.center <- r1*sin(cita)
+
+r2 <- round(runif(n, 6,7),2)
+x2.center <- r2*cos(cita)
+y2.center <- r2*sin(cita)
+
+r3 <- round(runif(n, 10,11),2)
+x3.center <- r3*cos(cita)
+y3.center <- r3*sin(cita)
+
+x1.ranks <-  round(runif(n, 1, 2),2)
+x2.ranks <-  round(runif(n, 1, 2),2)
+x3.ranks <-  round(runif(n, 1, 2),2)
+y1.ranks <-  round(runif(n, 1, 2),2)
+y2.ranks <-  round(runif(n, 1, 2),2)
+y3.ranks <-  round(runif(n, 1, 2),2)
+
+x1.lower <- x1.center - x1.ranks
+x1.upper <- x1.center + x1.ranks
+
+x2.lower <- x2.center - x2.ranks
+x2.upper <- x2.center + x2.ranks
+
+x3.lower <- x3.center - x3.ranks
+x3.upper <- x3.center + x3.ranks
+
+y1.lower <- y1.center - y1.ranks
+y2.lower <- y2.center - y2.ranks
+y3.lower <- y3.center - y3.ranks
+y1.upper <- y1.center + y1.ranks
+y2.upper <- y2.center + y2.ranks
+y3.upper <- y3.center + y3.ranks
+
+
+tabla <- data.frame(x1.lower,x1.upper,x2.lower,x2.upper,x3.lower,x3.upper,y1.lower,y1.upper,y2.lower,y2.upper,y3.lower,y3.upper, x1.center, x1.ranks,x2.center,x2.ranks,x3.center,x3.ranks, y1.center, y1.ranks, y2.center, y2.ranks, y3.center, y3.ranks)
+
+
+# Primero fijamos un espacio adecuado para graficar todo
+plot(NULL, xlim = c(-12, 12), ylim = c(-12, 12), xlab = "x", ylab = "y", asp = 1,
+     main = "Rectángulos simbólicos y sus centros")
+
+# Dibujar los rectángulos del grupo 1
+for (i in 1:n) {
+  rect(x1.lower[i], y1.lower[i], x1.upper[i], y1.upper[i], border = "blue", col = rgb(0, 0, 1, 0.2))
+  points(x1.center[i], y1.center[i], col = "blue", pch = 19, cex = 0.5)
+}
+
+# Rectángulos del grupo 2
+for (i in 1:n) {
+  rect(x2.lower[i], y2.lower[i], x2.upper[i], y2.upper[i], border = "forestgreen", col = rgb(0, 0.6, 0, 0.2))
+  points(x2.center[i], y2.center[i], col = "forestgreen", pch = 19, cex = 0.5)
+}
+
+# Rectángulos del grupo 3
+for (i in 1:n) {
+  rect(x3.lower[i], y3.lower[i], x3.upper[i], y3.upper[i], border = "darkorange", col = rgb(1, 0.5, 0, 0.2))
+  points(x3.center[i], y3.center[i], col = "darkorange", pch = 19, cex = 0.5)
+}
+
+legend("topright", legend = c("Grupo 1", "Grupo 2", "Grupo 3"),
+       col = c("blue", "forestgreen", "darkorange"), pch = 19, bty = "n")
+
+```
+
+```{r}
+Xc <- c(x1.center, x2.center, x3.center)
+Yc <- c(y1.center, y2.center, y3.center)
+Xl <- c(x1.lower, x2.lower, x3.lower)
+Yl <- c(y1.lower, y2.lower, y3.lower)
+Xu <- c(x1.upper, x2.upper, x3.upper)
+Yu <- c(y1.upper, y2.upper, y3.upper)
+
+indice1 <- spatgeom(y=Yc, x=Xc) 
+plot_curve(indice1, type = "curve")
+plot_curve(indice1, type = "deriv")
+
+indice2 <- spatgeom(y=Yl, x=Xl) 
+plot_curve(indice2, type = "curve")
+plot_curve(indice2, type = "deriv")
+
+indice3 <- spatgeom(y=Yu, x=Xu) 
+plot_curve(indice3, type = "curve")
+plot_curve(indice3, type = "deriv")
+```
+
+# Para la variable $x_{1}$.
+
+```{r}
+geom_indicesc <- indice1$results[[1]]$geom_indices 
+geom_indicescmenosr <- indice2$results[[1]]$geom_indices
+geom_indicescmasr <- indice3$results[[1]]$geom_indices
+
+geom_indicescmenosr1 <- geom_indicescmenosr %>% group_by(alpha) %>% filter(geom_corr==max(geom_corr)) %>% ungroup() 
+
+geom_indicescmasr1 <- geom_indicescmasr %>% group_by(alpha) %>% filter(geom_corr==max(geom_corr)) %>% ungroup() 
+
+geom_indicesc$label <- "centros"
+geom_indicescmenosr$label <- "centros menos rangos"
+geom_indicescmasr$label <- "centros más rangos"
+
+data_combined <- rbind(geom_indicesc,geom_indicescmenosr,geom_indicescmasr)
+data_combined1 <- rbind(geom_indicescmenosr1, geom_indicescmasr1)
+data_combined1 <- rbind(c(0,1),data_combined1)
+
+ggplotly(ggplot(data_combined, aes(x = alpha, y = geom_corr, color = label)) +
+  geom_step(size = 1) +
+  labs(
+    title = "Correlación geométrica con datos uniformes",
+    x = "Alpha",
+    y = "Geom_corr",
+    color = "Curvas"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom"))
+
+#Área acumulada entre las curvas: centros menos rangos y centros más rangos.
+
+library(pracma)
+
+alpha.vals <- sort(unique(c(geom_indicescmenosr1$alpha, geom_indicescmasr1$alpha)))
+
+geom_corr.cmasr <- approx(geom_indicescmasr1$alpha, geom_indicescmasr1$geom_corr, xout = alpha.vals, rule = 2)$y
+
+geom_corr.cmenosr <- approx(geom_indicescmenosr1$alpha, geom_indicescmenosr1$geom_corr, xout = alpha.vals, rule = 2)$y
+
+diff.geom_corr <- geom_corr.cmasr - geom_corr.cmenosr
+
+table.cmasr <- cbind(alpha.vals, geom_corr.cmasr)
+table.cmenosr <- cbind(alpha.vals, geom_corr.cmenosr)
+table.diff <- cbind(alpha.vals, diff.geom_corr)
+table.diff
+
+ggplot(table.diff, aes(x=alpha.vals, diff.geom_corr))+geom_point()
+
+area.acumulada <- cumsum(c(0, diff.geom_corr[-1] * diff(alpha.vals))) 
+area.acumulada #analizar esto
+
+data.acumulada <- data.frame(alpha = alpha.vals, area = area.acumulada)
+head(data.acumulada)
+
+p <- ggplot(data.acumulada, aes(x = alpha, y = area.acumulada)) +
+  geom_line(size = 1, color = "blue") +
+  labs(
+    title = "Área Acumulada entre las Curvas",
+    x = "Alpha",
+    y = "Área Acumulada"
+  ) +
+  theme_minimal()
+
+ ggplotly(p)
+
+# Derivada.
+
+tasa.cambio <- diff(area.acumulada) / diff(alpha.vals)
+alpha.medios <- (alpha.vals[-1] + alpha.vals[-length(alpha.vals)])/2
+data.derivada <- data.frame(alpha = alpha.medios, tasadecambio = tasa.cambio)
+
+p.derivada <- ggplot(data.derivada, aes(x = alpha, y = tasa.cambio)) +
+  geom_line(size = 1, color = "red") +
+  labs(
+    title = "Tasa de Cambio de la Función Acumulada",
+    x = "Alpha",
+    y = "Derivada (Tasa de Cambio)"
+  ) +
+  theme_minimal()
+
+ggplotly(p.derivada)
+```
+
+# Ejemplo 4. Con la tabla de datos *abalone*.
+
+## Método de centros.
+
+Primero, se tiene una tabla de datos simbólica de tipo intervalo, por ejemplo *abalone* de RSDA.
+Se obtiene la matriz de centros asociada.
+
+```{r}
+data <- abalone
+data.c <- interval.centers(data) 
+data.c <- round(data.c,2)
+```
+
+Sobre la matriz de centros, se aplica un modelo de regresión lineal clásico.
+Supongamos que se aplica un modelo de regresión lineal tomando como variable de respuesta *Whole_Weight*.
+
+```{r}
+modelo.c <- lm(WHOLE_WEIGHT ~., data.c)
+```
+
+El modelo es: $Y=-0.1834758-0.2693955X_{1}+1.4948113X_{2}+0.1146723X_{3}+0.6348267X_{4}+0.9660136X_{5}+0.8327747X_{6}$.
+
+```{r}
+Y.c <- modelo.c$fitted.values 
+Y.c <- round(Y.c,2)
+```
+
+Luego, se estudia la contribución de cada variable predictora al modelo a través del diagrama de dispersión asociado.
+
+### Contribución de la variable *LENGTH* al modelo de centros.
+
+```{r}
+data.c1 <- cbind(data.c[,-4],Y.c) 
+
+ggplot(data.c1, aes(x = LENGTH, y = Y.c))+geom_point()+labs(title = "LENGTH vs. Y") 
+```
+
+Lo que se está haciendo en realidad es tomar los centros de las observaciones de cada variable predictora como representantes de cada rectángulo de la agrupación rectangular formada por la variable predictora y la variable dependiente del modelo de regresión.
+
+Gráficamente:
+
+```{r}
+modelo1 <- sym.lm(WHOLE_WEIGHT ~ ., sym.data = abalone, method = "cm") 
+ypred1 <- sym.predict(modelo1, abalone)
+ypred1$Fitted$Minimums <- round(ypred1$Fitted$Minimums, 2)
+ypred1$Fitted$Maximums <- round(ypred1$Fitted$Maximums, 2)
+
+length1 <- data.frame(lengthmin=c(0.28,0.30,0.34,0.39,0.40,0.45,0.49,0.55,0.08,0.13,0.26,0.32,0.34,0.44,0.45,0.16,0.16,0.20,0.29,0.35,0.42,0.49,0.52,0.60),lengthmax=c(0.66,0.74,0.78,0.82,0.74,0.80,0.72,0.70,0.24,0.58,0.67,0.66,0.72,0.65,0.58,0.21,0.53,0.72,0.78,0.76,0.78,0.74,0.69,0.66)) #variable LENGTH
+
+clusters1 <- cbind(length1,ypred1$Fitted)
+colnames(clusters1) <- c('lengthmin','lengthmax','ymin','ymax')
+rectangulos1 <- ggplot() + geom_rect(data = clusters1,
+    aes(xmin = lengthmin, xmax = lengthmax, ymin = ymin, ymax = ymax),
+    fill = "blue", alpha = 0.1, color = "black"
+  ) +
+  labs(
+    title = "Centers for the variable LENGTH",
+    x = "LENGTH",
+    y = "Y"
+  ) +
+  theme_minimal()
+
+graf1 <- rectangulos1 + 
+  geom_point(
+    data = clusters1, 
+    aes(x = (lengthmin+lengthmax)/2, y = (ymin+ymax)/2), 
+    color = "orange", size = 2, alpha = 0.9
+  )
+
+graf1 
+```
+
+Luego, se calcula el índice de bondad de ajuste geométrico.
+
+```{r}
+indice1 <- spatgeom(y=data.c1$Y.c, x=data.c1[,-7]) 
+plot_curve(indice1, type = "curve")
+plot_curve(indice1, type = "deriv")
+```
+
+## Método de centros y rangos.
+
+Ahora, además de la matriz de centros se crea la matriz de rangos y se estudian los centros más rangos y los centros menos rangos.
+
+```{r}
+data.r <- interval.ranges(data) 
+data.r <- round(data.r,2)
+data.cmasr <- data.c + data.r
+data.cmenosr <- data.c - data.r
+```
+
+Se crea un modelo de regresión lineal clásico con los centros más rangos.
+
+```{r}
+modelo.cmasr <- lm(WHOLE_WEIGHT ~., data.cmasr)
+```
+
+El modelo es $Y=-0.19494+0.77978X_{1}-0.05459X_{2}+0.06312X_{3}+0.63785X_{4}+1.28787X_{5}+0.89348X_{6}$
+
+```{r}
+Y.cmasr <- modelo.cmasr$fitted.values 
+Y.cmasr <- round(Y.cmasr,2)
+```
+
+Luego, se estudia la contribución de cada variable predictora al modelo a través del diagrama de dispersión asociado.
+
+### Contribución de la variable *LENGTH* al modelo de centros más rangos.
+
+```{r}
+data.cmasr1 <- cbind(data.cmasr[,-4],Y.cmasr)
+ggplot(data.cmasr1, aes(x = LENGTH, y = Y.cmasr))+geom_point()+labs(title = "LENGTH vs. Y") #Nube de puntos LENGTH vs Y.cmasr
+```
+
+```{r}
+modelo2 <- sym.lm(WHOLE_WEIGHT ~ ., sym.data = abalone, method = "crm") 
+ypred2 <- sym.predict(modelo2, abalone)
+ypred2$Fitted$Minimums <- round(ypred2$Fitted$Minimums, 2)
+ypred2$Fitted$Maximums <- round(ypred2$Fitted$Maximums, 2)
+
+clusters2 <- cbind(length1,ypred2$Fitted)
+colnames(clusters2) <- c('lengthmin','lengthmax','ymin','ymax')
+
+rectangulos2 <- ggplot() + geom_rect(data = clusters2,
+    aes(xmin = lengthmin, xmax = lengthmax, ymin = ymin, ymax = ymax),
+    fill = "blue", alpha = 0.1, color = "black"
+  ) +
+  labs(
+    title = "Centers plus ranges for the variable LENGTH", x="LENGTH",
+    y = "Y"
+  ) +
+  theme_minimal()
+
+graf2 <- rectangulos2 + 
+  geom_point(
+    data = clusters2, 
+    aes(x = lengthmax, y = ymax), 
+    color = "red", size = 3, alpha = 0.9
+  )
+
+graf2
+```
+
+```{r}
+indice2 <- spatgeom(y=data.cmasr1$Y.cmasr, x=data.cmasr1[,-7]) 
+indice2
+plot_curve(indice2, type = "curve")
+plot_curve(indice2, type = "deriv")
+```
+
+Se repite lo anterior, pero ahora usando centros menos rangos.
+
+```{r}
+modelo.cmenosr <- lm(WHOLE_WEIGHT ~., data.cmenosr)
+```
+
+El modelo es $Y=-0.01563+1.11565X_{1}-1.39136X_{2}-0.05412X_{3}+0.30067X_{4}+1.70071X_{5}+1.77761X_{6}$
+
+```{r}
+Y.cmenosr <- modelo.cmenosr$fitted.values 
+Y.cmenosr <- round(Y.cmenosr,2)
+```
+
+### Contribución de la variable *LENGTH* al modelo de centros menos rangos.
+
+```{r}
+data.cmenosr1 <- cbind(data.cmenosr[,-4],Y.cmenosr)
+ggplot(data.cmenosr1, aes(x = LENGTH, y = Y.cmenosr))+geom_point()+labs(title = "LENGTH vs. Y") #Nube de puntos LENGTH vs Y.cmasr
+```
+
+```{r}
+modelo3 <- sym.lm(WHOLE_WEIGHT ~ ., sym.data = abalone, method = "crm") 
+ypred3 <- sym.predict(modelo3, abalone)
+ypred3$Fitted$Minimums <- round(ypred3$Fitted$Minimums,2)
+ypred3$Fitted$Maximums <- round(ypred3$Fitted$Maximums,2)
+
+clusters3 <- cbind(length1,ypred3$Fitted)
+colnames(clusters3) <- c('lengthmin','lengthmax','ymin','ymax')
+
+rectangulos3 <- ggplot() + geom_rect(data = clusters3,
+    aes(xmin = lengthmin, xmax = lengthmax, ymin = ymin, ymax = ymax),
+    fill = "blue", alpha = 0.1, color = "black"
+  ) +
+  labs(
+    title = "Centers minus ranges for the variable LENGTH",
+    x = "LENGTH",
+    y = "Y"
+  ) +
+  theme_minimal()
+
+graf3 <- rectangulos3 + 
+  geom_point(data = clusters3, 
+    aes(x = lengthmin, y = ymin), 
+    color = "green", size = 3, alpha = 0.9
+  )
+
+graf3
+```
+
+```{r}
+indice3 <- spatgeom(y=data.cmenosr1$Y.cmenosr, x=data.cmenosr1[,-7]) 
+plot_curve(indice3, type = "curve")
+plot_curve(indice3, type = "deriv")
+```
+
+### Gráfica final para la variable LENGTH con el método de centros y rangos.
+
+```{r}
+geom_indicesc <- indice1$results[[1]]$geom_indices #centros
+
+geom_indicescmasr <- indice2$results[[1]]$geom_indices #centrosmasrangos
+geom_indicescmasr1 <- geom_indicescmasr %>% group_by(alpha) %>% filter(geom_corr==max(geom_corr)) %>% ungroup() #Selección de los valores únicos de alpha, considerando el mínimo valor asociado en geom_corr
+ggplot(geom_indicescmasr1, aes(x=alpha,y=geom_corr))+geom_point()
+
+
+geom_indicescmenosr <- indice3$results[[1]]$geom_indices #centrosmenosrangos
+geom_indicescmenosr1 <- geom_indicescmenosr %>% group_by(alpha) %>% filter(geom_corr==max(geom_corr)) %>% ungroup() #Selección de los valores únicos de alpha, considerando el máximo valor asociado en geom_corr
+ggplot(geom_indicescmenosr1, aes(x=alpha,y=geom_corr))+geom_point()
+
+# Etiquetas para identificar cada curva
+
+geom_indicesc$label <- "centros"
+geom_indicescmasr$label <- "centros más rangos"
+geom_indicescmenosr$label <- "centros menos rangos"
+
+# Combinar los datos
+data_combined <- rbind(geom_indicesc,geom_indicescmasr, geom_indicescmenosr )
+data_combined1 <- rbind(geom_indicescmasr1, geom_indicescmenosr1)
+data_combined1 <- rbind(c(0,1),data_combined1)
+
+# Crear el gráfico
+ggplotly(ggplot(data_combined, aes(x = alpha, y = geom_corr, color = label)) +
+  geom_step(size = 1) +
+  labs(
+    title = "Correlación geométrica para la variable Syst",
+    x = "Alpha",
+    y = "Geom_corr",
+    color = "Curvas"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom"))
+```
+
+```{r}
+#Área acumulada entre las curvas: centros menos rangos y centros más rangos.
+library(pracma)
+
+alpha.vals <- sort(unique(c(geom_indicescmasr1$alpha, geom_indicescmenosr1$alpha)))
+
+geom_corr.cmasr <- approx(geom_indicescmasr1$alpha, geom_indicescmasr1$geom_corr, xout = alpha.vals, rule = 2)$y
+
+geom_corr.cmenosr <- approx(geom_indicescmenosr1$alpha, geom_indicescmenosr1$geom_corr, xout = alpha.vals, rule = 2)$y
+
+diff.geom_corr <- geom_corr.cmasr - geom_corr.cmenosr
+
+table.cmasr <- cbind(alpha.vals, geom_corr.cmasr)
+ggplot(table.cmasr, aes(x=alpha.vals, geom_corr.cmasr))+geom_point()
+
+table.cmenosr <- cbind(alpha.vals, geom_corr.cmenosr)
+ggplot(table.cmenosr, aes(x=alpha.vals, geom_corr.cmenosr))+geom_point()
+
+table.diff <- cbind(alpha.vals, diff.geom_corr)
+table.diff
+
+ggplot(table.diff, aes(x=alpha.vals, diff.geom_corr))+geom_point()
+
+area.acumulada <- cumsum(c(0, diff.geom_corr[-1] * diff(alpha.vals))) #analizar esto
+area.acumulada
+
+data.acumulada <- data.frame(alpha = alpha.vals, area = area.acumulada)
+data.acumulada
+
+p <- ggplot(data.acumulada, aes(x = alpha, y = area.acumulada)) +
+  geom_line(size = 1, color = "blue") +
+  labs(
+    title = "Área Acumulada entre las Curvas",
+    x = "Alpha",
+    y = "Área Acumulada"
+  ) +
+  theme_minimal()
+
+ggplotly(p)
+
+#Derivada.
+
+tasa.cambio <- diff(area.acumulada) / diff(alpha.vals)
+alpha.medios <- (alpha.vals[-1] + alpha.vals[-length(alpha.vals)])/2
+data.derivada <- data.frame(alpha = alpha.medios, tasadecambio = tasa.cambio)
+
+p.derivada <- ggplot(data.derivada, aes(x = alpha, y = tasa.cambio)) +
+  geom_line(size = 1, color = "red") +
+  labs(
+    title = "Tasa de Cambio de la Función Acumulada",
+    x = "Alpha",
+    y = "Derivada (Tasa de Cambio)"
+  ) +
+  theme_minimal()
+
+ggplotly(p.derivada)
+```
+
+### Contribución de la variable *DIAMETER* al modelo de centros.
+
+```{r}
+data.c1 <- cbind(data.c[,-4],Y.c) 
+ggplot(data.c1, aes(x = DIAMETER, y = Y.c))+geom_point()+labs(title = "LENGTH vs. Y") 
+```
+
+Lo que se está haciendo en realidad es tomar los centros de las observaciones de cada variable predictora como representantes de cada rectángulo de la agrupación rectangular formada por la variable predictora y la variable dependiente del modelo de regresión.
+
+Gráficamente:
+
+```{r}
+diameter1 <- data.frame(lengthmin=c(0.20,0.22,0.26,0.30,0.32,0.38,0.36,0.46,0.06,0.10,0.20,0.24,0.26,0.33,0.36,0.11,0.12,0.16,0.22,0.26,0.32,0.38,0.40,0.50),lengthmax=c(0.48,0.58,0.63,0.65,0.60,0.63,0.58,0.58,0.18,0.45,0.50,0.52,0.55,0.52,0.44,0.15,0.41,0.57,0.63,0.60,0.59,0.59,0.54,0.54)) #variable DIAMETER
+
+clusters1.1 <- cbind(diameter1,ypred1$Fitted)
+colnames(clusters1.1) <- c('lengthmin','lengthmax','ymin','ymax')
+rectangulos1.1 <- ggplot() + geom_rect(data = clusters1.1,
+    aes(xmin = lengthmin, xmax = lengthmax, ymin = ymin, ymax = ymax),
+    fill = "blue", alpha = 0.2, color = "black"
+  ) +
+  labs(
+    title = "Centers for the variable DIAMETER",
+    x = "DIAMETER",
+    y = "Y"
+  ) +
+  theme_minimal()
+
+graf1.1 <- rectangulos1.1 + 
+  geom_point(
+    data = clusters1.1, 
+    aes(x = (lengthmin+lengthmax)/2, y = (ymin+ymax)/2), 
+    color = "orange", size = 2, alpha = 0.9
+  )
+
+graf1.1
+```
+
+### Contribución de la variable *DIAMETER* al modelo de centros más rangos.
+
+```{r}
+data.cmasr1 <- cbind(data.cmasr[,-4],Y.cmasr)
+ggplot(data.cmasr1, aes(x = DIAMETER, y = Y.cmasr))+geom_point()+labs(title = "DIAMETER vs. Y") 
+```
+
+```{r}
+clusters2.1 <- cbind(diameter1,ypred2$Fitted)
+colnames(clusters2.1) <- c('lengthmin','lengthmax','ymin','ymax')
+
+rectangulos2.1 <- ggplot() + geom_rect(data = clusters2.1,
+    aes(xmin = lengthmin, xmax = lengthmax, ymin = ymin, ymax = ymax),
+    fill = "blue", alpha = 0.1, color = "black"
+  ) +
+  labs(
+    title = "Centers plus ranges for the variable DIAMETER", x="DIAMETER",
+    y = "Y"
+  ) +
+  theme_minimal()
+
+graf2.1 <- rectangulos2.1 + 
+  geom_point(
+    data = clusters2.1, 
+    aes(x = lengthmax, y = ymax), 
+    color = "red", size = 3, alpha = 0.9
+  )
+
+graf2.1
+```
+
+### Contribución de la variable *DIAMETER* al modelo de centros menos rangos.
+
+```{r}
+data.cmenosr1 <- cbind(data.cmenosr[,-4],Y.cmenosr)
+ggplot(data.cmenosr1, aes(x = DIAMETER, y = Y.cmenosr))+geom_point()+labs(title = "DIAMETER vs. Y") 
+```
+
+```{r}
+clusters3.1 <- cbind(diameter1,ypred3$Fitted)
+colnames(clusters3.1) <- c('lengthmin','lengthmax','ymin','ymax')
+
+rectangulos3.1 <- ggplot() + geom_rect(data = clusters3.1,
+    aes(xmin = lengthmin, xmax = lengthmax, ymin = ymin, ymax = ymax),
+    fill = "blue", alpha = 0.1, color = "black"
+  ) +
+  labs(
+    title = "Point clouds of centers and extremes",
+    x = "Variable 1",
+    y = "Y"
+  ) +
+  theme_minimal()
+
+graf3.1 <- rectangulos3.1 + 
+  geom_point(data = clusters3.1, 
+    aes(x = lengthmin, y = ymin), 
+    color = "green", size = 2, alpha = 0.9
+  )+ geom_point(
+    data = clusters2.1, 
+    aes(x = lengthmax, y = ymax), 
+    color = "red", size = 2, alpha = 0.9
+  )+ 
+  geom_point(
+    data = clusters1.1, 
+    aes(x = (lengthmin+lengthmax)/2, y = (ymin+ymax)/2), 
+    color = "orange", size = 2, alpha = 0.9
+  )
+
+graf3.1
+```
+
+### Gráfica final para la variable DIAMETER con el método de centros y rangos.
+
+```{r}
+geom_indicesc <- indice1$results[[2]]$geom_indices #centros
+
+geom_indicescmasr <- indice2$results[[2]]$geom_indices #centrosmasrangos
+geom_indicescmasr1 <- geom_indicescmasr %>% group_by(alpha) %>% filter(geom_corr==max(geom_corr)) %>% ungroup() #Selección de los valores únicos de alpha, considerando el mínimo valor asociado en geom_corr
+ggplot(geom_indicescmasr1, aes(x=alpha,y=geom_corr))+geom_point()
+
+
+geom_indicescmenosr <- indice3$results[[2]]$geom_indices #centrosmenosrangos
+geom_indicescmenosr1 <- geom_indicescmenosr %>% group_by(alpha) %>% filter(geom_corr==max(geom_corr)) %>% ungroup() #Selección de los valores únicos de alpha, considerando el máximo valor asociado en geom_corr
+ggplot(geom_indicescmenosr1, aes(x=alpha,y=geom_corr))+geom_point()
+
+# Etiquetas para identificar cada curva
+
+geom_indicesc$label <- "centros"
+geom_indicescmasr$label <- "centros más rangos"
+geom_indicescmenosr$label <- "centros menos rangos"
+
+# Combinar los datos
+data_combined <- rbind(geom_indicesc,geom_indicescmasr, geom_indicescmenosr )
+data_combined1 <- rbind(geom_indicescmasr1, geom_indicescmenosr1)
+
+# Crear el gráfico
+ggplotly(ggplot(data_combined, aes(x = alpha, y = geom_corr, color = label)) +
+  geom_step(size = 1) +
+  labs(
+    title = "Correlación geométrica para la variable DIAMETER",
+    x = "Alpha",
+    y = "Geom_corr",
+    color = "Curvas"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom"))
+```
+
+```{r}
+library(pracma)
+
+alpha.vals <- sort(unique(c(geom_indicescmasr1$alpha, geom_indicescmenosr1$alpha)))
+
+geom_corr.cmasr <- approx(geom_indicescmasr1$alpha, geom_indicescmasr1$geom_corr, xout = alpha.vals, rule = 2)$y
+
+geom_corr.cmenosr <- approx(geom_indicescmenosr1$alpha, geom_indicescmenosr1$geom_corr, xout = alpha.vals, rule = 2)$y
+
+diff.geom_corr <- geom_corr.cmasr - geom_corr.cmenosr
+
+table.cmasr <- cbind(alpha.vals, geom_corr.cmasr)
+ggplot(table.cmasr, aes(x=alpha.vals, geom_corr.cmasr))+geom_point()
+
+table.cmenosr <- cbind(alpha.vals, geom_corr.cmenosr)
+ggplot(table.cmenosr, aes(x=alpha.vals, geom_corr.cmenosr))+geom_point()
+
+table.diff <- cbind(alpha.vals, diff.geom_corr)
+table.diff
+
+ggplot(table.diff, aes(x=alpha.vals, diff.geom_corr))+geom_point()
+
+area.acumulada <- cumsum(c(0, diff.geom_corr[-1] * diff(alpha.vals))) #analizar esto
+area.acumulada
+
+data.acumulada <- data.frame(alpha = alpha.vals, area = area.acumulada)
+data.acumulada
+
+p <- ggplot(data.acumulada, aes(x = alpha, y = area.acumulada)) +
+  geom_line(size = 1, color = "blue") +
+  labs(
+    title = "Área Acumulada entre las Curvas",
+    x = "Alpha",
+    y = "Área Acumulada"
+  ) +
+  theme_minimal()
+
+ggplotly(p)
+
+#Derivada.
+
+tasa.cambio <- diff(area.acumulada) / diff(alpha.vals)
+alpha.medios <- (alpha.vals[-1] + alpha.vals[-length(alpha.vals)])/2
+data.derivada <- data.frame(alpha = alpha.medios, tasadecambio = tasa.cambio)
+
+p.derivada <- ggplot(data.derivada, aes(x = alpha, y = tasa.cambio)) +
+  geom_line(size = 1, color = "red") +
+  labs(
+    title = "Tasa de Cambio de la Función Acumulada",
+    x = "Alpha",
+    y = "Derivada (Tasa de Cambio)"
+  ) +
+  theme_minimal()
+
+ggplotly(p.derivada)
+```
+
+### Contribución de la variable *HEIGHT* al modelo de centros.
+
+```{r}
+data.c1 <- cbind(data.c[,-4],Y.c) 
+ggplot(data.c1, aes(x = HEIGHT, y = Y.c))+geom_point()+labs(title = "HEIGHT vs. Y") 
+```
+
+Lo que se está haciendo en realidad es tomar los centros de las observaciones de cada variable predictora como representantes de cada rectángulo de la agrupación rectangular formada por la variable predictora y la variable dependiente del modelo de regresión.
+
+Gráficamente:
+
+```{r}
+height1 <- data.frame(lengthmin=c(0.07,0.02,0.06,0.10,0.10,0.14,0.12,0.18,0.01,0.00,0.00,0.08,0.08,0.12,0.12,0.04,0.02,0.04,0.06,0.08,0.12,0.13,0.14,0.20),lengthmax=c(0.18,1.13,0.23,0.25,0.24,0.22,0.21,0.22,0.06,0.15,0.18,0.19,0.22,0.20,0.18,0.05,0.16,0.20,0.52,0.24,0.24,0.23,0.22,0.22)) #variable HEIGHT
+
+clusters1.2 <- cbind(height1,ypred1$Fitted)
+colnames(clusters1.2) <- c('lengthmin','lengthmax','ymin','ymax')
+rectangulos1.2 <- ggplot() + geom_rect(data = clusters1.2,
+    aes(xmin = lengthmin, xmax = lengthmax, ymin = ymin, ymax = ymax),
+    fill = "blue", alpha = 0.2, color = "black"
+  ) +
+  labs(
+    title = "Centers for the variable HEIGHT",
+    x = "HEIGHT",
+    y = "Y"
+  ) +
+  theme_minimal()
+
+graf1.2 <- rectangulos1.2 + 
+  geom_point(
+    data = clusters1.2, 
+    aes(x = (lengthmin+lengthmax)/2, y = (ymin+ymax)/2), 
+    color = "orange", size = 2, alpha = 0.9
+  )
+
+graf1.2 
+```
+
+### Contribución de la variable *HEIGHT* al modelo de centros más rangos.
+
+```{r}
+data.cmasr1 <- cbind(data.cmasr[,-4],Y.cmasr)
+ggplot(data.cmasr1, aes(x = HEIGHT, y = Y.cmasr))+geom_point()+labs(title = "HEIGHT vs. Y") 
+```
+
+```{r}
+clusters2.2 <- cbind(height1,ypred2$Fitted)
+colnames(clusters2.2) <- c('lengthmin','lengthmax','ymin','ymax')
+
+rectangulos2.2 <- ggplot() + geom_rect(data = clusters2.2,
+    aes(xmin = lengthmin, xmax = lengthmax, ymin = ymin, ymax = ymax),
+    fill = "blue", alpha = 0.1, color = "black"
+  ) +
+  labs(
+    title = "Centers plus ranges for the variable HEIGHT", x="HEIGHT",
+    y = "Y"
+  ) +
+  theme_minimal()
+
+graf2.2 <- rectangulos2.2 + 
+  geom_point(
+    data = clusters2.2, 
+    aes(x = lengthmax, y = ymax), 
+    color = "red", size = 3, alpha = 0.9
+  )
+
+graf2.2
+```
+
+### Contribución de la variable *HEIGHT* al modelo de centros menos rangos.
+
+```{r}
+data.cmenosr1 <- cbind(data.cmenosr[,-4],Y.cmenosr)
+ggplot(data.cmenosr1, aes(x = HEIGHT, y = Y.cmenosr))+geom_point()+labs(title = "DIAMETER vs. Y") 
+```
+
+```{r}
+clusters3.2 <- cbind(height1,ypred3$Fitted)
+colnames(clusters3.2) <- c('lengthmin','lengthmax','ymin','ymax')
+
+rectangulos3.2 <- ggplot() + geom_rect(data = clusters3.2,
+    aes(xmin = lengthmin, xmax = lengthmax, ymin = ymin, ymax = ymax),
+    fill = "blue", alpha = 0.1, color = "black"
+  ) +
+  labs(
+    title = "Centers minus ranges for the variable HEIGHT",
+    x = "HEIGHT",
+    y = "Y"
+  ) +
+  theme_minimal()
+
+graf3.2 <- rectangulos3.2 + 
+  geom_point(data = clusters3.2, 
+    aes(x = lengthmin, y = ymin), 
+    color = "green", size = 3, alpha = 0.9
+  )
+
+graf3.2
+```
+
+### Gráfica final para la variable HEIGHT con el método de centros y rangos.
+
+```{r}
+geom_indicesc <- indice1$results[[3]]$geom_indices #centros
+
+geom_indicescmasr <- indice2$results[[3]]$geom_indices #centrosmasrangos
+geom_indicescmasr1 <- geom_indicescmasr %>% group_by(alpha) %>% filter(geom_corr==max(geom_corr)) %>% ungroup() #Selección de los valores únicos de alpha, considerando el mínimo valor asociado en geom_corr
+ggplot(geom_indicescmasr1, aes(x=alpha,y=geom_corr))+geom_point()
+
+
+geom_indicescmenosr <- indice3$results[[3]]$geom_indices #centrosmenosrangos
+geom_indicescmenosr1 <- geom_indicescmenosr %>% group_by(alpha) %>% filter(geom_corr==max(geom_corr)) %>% ungroup() #Selección de los valores únicos de alpha, considerando el máximo valor asociado en geom_corr
+ggplot(geom_indicescmenosr1, aes(x=alpha,y=geom_corr))+geom_point()
+
+# Etiquetas para identificar cada curva
+
+geom_indicesc$label <- "centros"
+geom_indicescmasr$label <- "centros más rangos"
+geom_indicescmenosr$label <- "centros menos rangos"
+
+# Combinar los datos
+data_combined <- rbind(geom_indicesc,geom_indicescmasr, geom_indicescmenosr )
+data_combined1 <- rbind(geom_indicescmasr1, geom_indicescmenosr1)
+
+# Crear el gráfico
+ggplotly(ggplot(data_combined, aes(x = alpha, y = geom_corr, color = label)) +
+  geom_step(size = 1) +
+  labs(
+    title = "Correlación geométrica para la variable HEIGHT",
+    x = "Alpha",
+    y = "Geom_corr",
+    color = "Curvas"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom"))
+```
+
+```{r}
+library(pracma)
+
+alpha.vals <- sort(unique(c(geom_indicescmasr1$alpha, geom_indicescmenosr1$alpha)))
+
+geom_corr.cmasr <- approx(geom_indicescmasr1$alpha, geom_indicescmasr1$geom_corr, xout = alpha.vals, rule = 2)$y
+
+geom_corr.cmenosr <- approx(geom_indicescmenosr1$alpha, geom_indicescmenosr1$geom_corr, xout = alpha.vals, rule = 2)$y
+
+diff.geom_corr <- geom_corr.cmasr - geom_corr.cmenosr
+
+table.cmasr <- cbind(alpha.vals, geom_corr.cmasr)
+ggplot(table.cmasr, aes(x=alpha.vals, geom_corr.cmasr))+geom_point()
+
+table.cmenosr <- cbind(alpha.vals, geom_corr.cmenosr)
+ggplot(table.cmenosr, aes(x=alpha.vals, geom_corr.cmenosr))+geom_point()
+
+table.diff <- cbind(alpha.vals, diff.geom_corr)
+table.diff
+
+ggplot(table.diff, aes(x=alpha.vals, diff.geom_corr))+geom_point()
+
+area.acumulada <- cumsum(c(0, diff.geom_corr[-1] * diff(alpha.vals))) #analizar esto
+area.acumulada
+
+data.acumulada <- data.frame(alpha = alpha.vals, area = area.acumulada)
+data.acumulada
+
+p <- ggplot(data.acumulada, aes(x = alpha, y = area.acumulada)) +
+  geom_line(size = 1, color = "blue") +
+  labs(
+    title = "Área Acumulada entre las Curvas",
+    x = "Alpha",
+    y = "Área Acumulada"
+  ) +
+  theme_minimal()
+
+ggplotly(p)
+
+#Derivada.
+
+tasa.cambio <- diff(area.acumulada) / diff(alpha.vals)
+alpha.medios <- (alpha.vals[-1] + alpha.vals[-length(alpha.vals)])/2
+data.derivada <- data.frame(alpha = alpha.medios, tasadecambio = tasa.cambio)
+
+p.derivada <- ggplot(data.derivada, aes(x = alpha, y = tasa.cambio)) +
+  geom_line(size = 1, color = "red") +
+  labs(
+    title = "Tasa de Cambio de la Función Acumulada",
+    x = "Alpha",
+    y = "Derivada (Tasa de Cambio)"
+  ) +
+  theme_minimal() 
+
+ggplotly(p.derivada) 
+
+# Esta curva coincide con la nube de puntos de las diferencias, puesto que es la derivada de la curva obtenida con integración. El máximo alpha obtenido es 0.39
+```
+
+### Contribución de la variable *SHUCKED_WEIGHT* al modelo de centros.
+
+```{r}
+data.c1 <- cbind(data.c[,-4],Y.c) 
+ggplot(data.c1, aes(x = SHUCKED_WEIGHT, y = Y.c))+geom_point()+labs(title = "SHUCKED_WEIGHT vs. Y") 
+```
+
+Lo que se está haciendo en realidad es tomar los centros de las observaciones de cada variable predictora como representantes de cada rectángulo de la agrupación rectangular formada por la variable predictora y la variable dependiente del modelo de regresión.
+
+Gráficamente:
+
+```{r}
+shucked_weight1 <- data.frame(lengthmin=c(0.03,0.06,0.07,0.11,0.12,0.16,0.16,0.32,0.00,0.00,0.03,0.06,0.07,0.16,0.11,0.01,0.01,0.02,0.04,0.10,0.11,0.22,0.25,0.38),lengthmax=c(0.64,1.16,1.49,1.23,0.84,0.93,0.82,0.71,0.03,0.50,0.60,0.72,0.77,0.63,0.39,0.02,0.32,1.25,1.35,1.35,1.15,0.87,0.74,0.75)) #variable SHUCKED_WEIGHT
+
+clusters1.3 <- cbind(shucked_weight1,ypred1$Fitted)
+colnames(clusters1.3) <- c('lengthmin','lengthmax','ymin','ymax')
+rectangulos1.3 <- ggplot() + geom_rect(data = clusters1.3,
+    aes(xmin = lengthmin, xmax = lengthmax, ymin = ymin, ymax = ymax),
+    fill = "blue", alpha = 0.2, color = "black"
+  ) +
+  labs(
+    title = "Centers for the variable HEIGHT",
+    x = "HEIGHT",
+    y = "Y"
+  ) +
+  theme_minimal()
+
+graf1.3 <- rectangulos1.3 + 
+  geom_point(
+    data = clusters1.3, 
+    aes(x = (lengthmin+lengthmax)/2, y = (ymin+ymax)/2), 
+    color = "orange", size = 2, alpha = 0.9
+  )
+
+graf1.3
+```
+
+### Contribución de la variable *SHUCKED_WEIGHT* al modelo de centros más rangos.
+
+```{r}
+data.cmasr1 <- cbind(data.cmasr[,-4],Y.cmasr)
+ggplot(data.cmasr1, aes(x = SHUCKED_WEIGHT, y = Y.cmasr))+geom_point()+labs(title = "SHUCKED_WEIGHT vs. Y") 
+```
+
+```{r}
+clusters2.3 <- cbind(shucked_weight1,ypred2$Fitted)
+colnames(clusters2.3) <- c('lengthmin','lengthmax','ymin','ymax')
+
+rectangulos2.3 <- ggplot() + geom_rect(data = clusters2.3,
+    aes(xmin = lengthmin, xmax = lengthmax, ymin = ymin, ymax = ymax),
+    fill = "blue", alpha = 0.1, color = "black"
+  ) +
+  labs(
+    title = "Centers plus ranges for the variable SHUCKED_WEIGHT ", x="SHUCKED_WEIGHT",
+    y = "Y"
+  ) +
+  theme_minimal()
+
+graf2.3 <- rectangulos2.3 + 
+  geom_point(
+    data = clusters2.3, 
+    aes(x = lengthmax, y = ymax), 
+    color = "red", size = 3, alpha = 0.9
+  )
+
+graf2.3
+```
+
+### Contribución de la variable *SHUCKED_WEIGHT* al modelo de centros menos rangos.
+
+```{r}
+data.cmenosr1 <- cbind(data.cmenosr[,-4],Y.cmenosr)
+ggplot(data.cmenosr1, aes(x = SHUCKED_WEIGHT, y = Y.cmenosr))+geom_point()+labs(title = "SHUCKED_WEIGHT vs. Y") 
+```
+
+```{r}
+clusters3.3 <- cbind(shucked_weight1,ypred3$Fitted)
+colnames(clusters3.3) <- c('lengthmin','lengthmax','ymin','ymax')
+
+rectangulos3.3 <- ggplot() + geom_rect(data = clusters3.3,
+    aes(xmin = lengthmin, xmax = lengthmax, ymin = ymin, ymax = ymax),
+    fill = "blue", alpha = 0.1, color = "black"
+  ) +
+  labs(
+    title = "Centers minus ranges for the variable SHUCKED_WEIGHT ",
+    x = "SHUCKED_WEIGHT",
+    y = "Y"
+  ) +
+  theme_minimal()
+
+graf3.3 <- rectangulos3.3 + 
+  geom_point(data = clusters3.3, 
+    aes(x = lengthmin, y = ymin), 
+    color = "green", size = 3, alpha = 0.9
+  )
+
+graf3.3
+```
+
+### Gráfica final para la variable SHUCKED_WEIGHT  con el método de centros y rangos.
+
+```{r}
+geom_indicesc <- indice1$results[[4]]$geom_indices #centros
+
+geom_indicescmasr <- indice2$results[[4]]$geom_indices #centrosmasrangos
+geom_indicescmasr1 <- geom_indicescmasr %>% group_by(alpha) %>% filter(geom_corr==max(geom_corr)) %>% ungroup() #Selección de los valores únicos de alpha, considerando el mínimo valor asociado en geom_corr
+ggplot(geom_indicescmasr1, aes(x=alpha,y=geom_corr))+geom_point()
+
+
+geom_indicescmenosr <- indice3$results[[4]]$geom_indices #centrosmenosrangos
+geom_indicescmenosr1 <- geom_indicescmenosr %>% group_by(alpha) %>% filter(geom_corr==max(geom_corr)) %>% ungroup() #Selección de los valores únicos de alpha, considerando el máximo valor asociado en geom_corr
+ggplot(geom_indicescmenosr1, aes(x=alpha,y=geom_corr))+geom_point()
+
+# Etiquetas para identificar cada curva
+
+geom_indicesc$label <- "centros"
+geom_indicescmasr$label <- "centros más rangos"
+geom_indicescmenosr$label <- "centros menos rangos"
+
+# Combinar los datos
+data_combined <- rbind(geom_indicesc,geom_indicescmasr, geom_indicescmenosr )
+data_combined1 <- rbind(geom_indicescmasr1, geom_indicescmenosr1)
+
+# Crear el gráfico
+ggplotly(ggplot(data_combined, aes(x = alpha, y = geom_corr, color = label)) +
+  geom_step(size = 1) +
+  labs(
+    title = "Correlación geométrica para la variable SHUCKED_WEIGHT",
+    x = "Alpha",
+    y = "Geom_corr",
+    color = "Curvas"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom"))
+```
+
+```{r}
+library(pracma)
+
+alpha.vals <- sort(unique(c(geom_indicescmasr1$alpha, geom_indicescmenosr1$alpha)))
+
+geom_corr.cmasr <- approx(geom_indicescmasr1$alpha, geom_indicescmasr1$geom_corr, xout = alpha.vals, rule = 2)$y
+
+geom_corr.cmenosr <- approx(geom_indicescmenosr1$alpha, geom_indicescmenosr1$geom_corr, xout = alpha.vals, rule = 2)$y
+
+diff.geom_corr <- geom_corr.cmasr - geom_corr.cmenosr
+
+table.cmasr <- cbind(alpha.vals, geom_corr.cmasr)
+ggplot(table.cmasr, aes(x=alpha.vals, geom_corr.cmasr))+geom_point()
+
+table.cmenosr <- cbind(alpha.vals, geom_corr.cmenosr)
+ggplot(table.cmenosr, aes(x=alpha.vals, geom_corr.cmenosr))+geom_point()
+
+table.diff <- cbind(alpha.vals, diff.geom_corr)
+table.diff
+
+ggplot(table.diff, aes(x=alpha.vals, diff.geom_corr))+geom_point()
+
+area.acumulada <- cumsum(c(0, diff.geom_corr[-1] * diff(alpha.vals))) #analizar esto
+area.acumulada
+
+data.acumulada <- data.frame(alpha = alpha.vals, area = area.acumulada)
+data.acumulada
+
+p <- ggplot(data.acumulada, aes(x = alpha, y = area.acumulada)) +
+  geom_line(size = 1, color = "blue") +
+  labs(
+    title = "Área Acumulada entre las Curvas",
+    x = "Alpha",
+    y = "Área Acumulada"
+  ) +
+  theme_minimal()
+
+ggplotly(p)
+
+#Derivada.
+
+tasa.cambio <- diff(area.acumulada) / diff(alpha.vals)
+alpha.medios <- (alpha.vals[-1] + alpha.vals[-length(alpha.vals)])/2
+data.derivada <- data.frame(alpha = alpha.medios, tasadecambio = tasa.cambio)
+
+p.derivada <- ggplot(data.derivada, aes(x = alpha, y = tasa.cambio)) +
+  geom_line(size = 1, color = "red") +
+  labs(
+    title = "Tasa de Cambio de la Función Acumulada",
+    x = "Alpha",
+    y = "Derivada (Tasa de Cambio)"
+  ) +
+  theme_minimal() 
+
+ggplotly(p.derivada) 
+
+# Esta curva coincide con la nube de puntos de las diferencias, puesto que es la derivada de la curva obtenida con integración. El máximo alpha obtenido es 0.39
+```
+
+
+HACER LO MISMO CON TODAS LAS OTRAS VARIABLES.
+
+
+
+# Ejemplo 2. Con la tabla de datos simbólica *cardiologicalv2*.
+
+
+
+## Método de centros.
+
+Primero, se tiene una tabla de datos simbólica de tipo intervalo, por ejemplo *cardiologicalv2* de RSDA.
+
+Se obtiene la matriz de centros asociada.
+
+```{r}
+data <- cardiologicalv2
+data.c <- interval.centers(data) 
+```
+
+Sobre la matriz de centros se aplica un modelo de regresión lineal clásico.
+Supongamos que se aplica un modelo de regresión lineal tomando como variable de respuesta *Pulse*.
+
+```{r}
+modelo.c <- lm(Pulse ~., data.c)
+```
+
+El modelo es: $Y=43.9379 + 0.1635X_{1}+0.2109X_{2}-1.4132X_{3}+0.2019X_{4}$.
+
+```{r}
+Y.c <- modelo.c$fitted.values 
+```
+
+Luego, se estudia la contribución de cada variable predictora al modelo a través del diagrama de dispersión asociado.
+
+Para la variable *Syst*, se tiene la nube de puntos:  
+
+```{r}
+data.c1 <- cbind(data.c[,-1],Y.c) 
+summary(data.c1)
+ggplotly(ggplot(data.c1, aes(x = Syst, y = Y.c))+geom_point()+labs(title = "Syst vs. Y"))
+```
+
+Lo que se está haciendo en realidad es tomar los centros de las observaciones de cada variable predictora como representantes de cada rectángulo de la agrupación rectangular formada por la variable predictora y la variable dependiente del modelo de regresión.
+
+Gráficamente:
+
+```{r}
+modelo1 <- sym.lm(Pulse ~ ., sym.data = cardiologicalv2 , method = "cm") 
+ypred1 <- sym.predict(modelo1, cardiologicalv2)
+
+#length <- cardiologicalv2[c('Syst')]
+length1 <- data.frame(lengthmin=c(90,90,140,110,90,130,60,130,110,138,67,56,78,56,56,90,89,89,78,78,78,90,90,90,140,110,90,130,60,130,110,138,67,56,78,56,56,90,89,89,78,78,78,90),lengthmax=c(100,130,180,142,100,160,100,160,190,180, 89,100,130,89,142,89,160,90,160,89,180,150,100,130,180,142,100,160,100,160,190,180,89,100,130,89,142,89,160,90,160,89,180,150))
+
+clusters1 <- cbind(length1,ypred1$Fitted)
+colnames(clusters1) <- c('lengthmin','lengthmax','ymin','ymax')
+rectangulos1 <- ggplot() + geom_rect(data = clusters1,
+    aes(xmin = lengthmin, xmax = lengthmax, ymin = ymin, ymax = ymax),
+    fill = "blue", alpha = 0.1, color = "black"
+  ) +
+  labs(
+    title = "Agrupación rectangular",
+    x = "Syst",
+    y = "Y"
+  ) +
+  theme_minimal()
+
+graf1 <- rectangulos1 + 
+  geom_point(
+    data = clusters1, 
+    aes(x = (lengthmin+lengthmax)/2, y = (ymin+ymax)/2), 
+    color = "orange", size = 3, alpha = 0.9
+  )
+
+graf1 
+
+ggplotly(graf1)
+```
+
+Luego, se calcula el índice de bondad de ajuste geométrico.
+
+```{r}
+indice1 <- spatgeom(y=data.c1$Y.c, x=data.c1[,-5])
+plot_curve(indice1, type = "curve")
+plot_curve(indice1, type = "deriv")
+```
+
+## Método de centros y rangos.
+
+Ahora, además de la matriz de centros se crea la matriz de rangos y se estudian los centros más rangos y los centros menos rangos.
+  
+```{r}
+data.r <- interval.ranges(data) 
+data.cmasr <- data.c + data.r
+data.cmenosr <- data.c - data.r
+```
+
+Se crea un modelo de regresión lineal clásico con los centros más rangos.
+
+```{r}
+modelo.cmasr <- lm(Pulse~., data.cmasr)
+```
+
+El modelo es $Y=68.3611 + 0.1158X_{1}+0.1557X_{2}-1.9050X_{3}+0.2077X_{4}$
+
+```{r}
+Y.cmasr <- modelo.cmasr$fitted.values 
+```
+
+Luego, se estudia la contribución de cada variable predictora al modelo a través del diagrama de dispersión asociado.
+
+## Variable Syst.
+
+```{r}
+data.cmasr1 <- cbind(data.cmasr[,-1],Y.cmasr)
+ggplot(data.cmasr1, aes(x = Syst, y = Y.cmasr))+geom_point()+labs(title = "Syst vs. Y") #Nube de puntos LENGTH vs Y.cmasr
+```
+
+```{r}
+modelo2 <- sym.lm(Pulse ~ ., sym.data = cardiologicalv2, method = "crm") 
+ypred2 <- sym.predict(modelo2, cardiologicalv2)
+
+clusters2 <- cbind(length1,ypred2$Fitted)
+colnames(clusters2) <- c('lengthmin','lengthmax','ymin','ymax')
+
+rectangulos2 <- ggplot() + geom_rect(data = clusters2,
+    aes(xmin = lengthmin, xmax = lengthmax, ymin = ymin, ymax = ymax),
+    fill = "blue", alpha = 0.1, color = "black"
+  ) +
+  labs(
+    title = "Agrupación rectangular",
+    x = "Syst",
+    y = "Y"
+  ) +
+  theme_minimal()
+
+graf2 <- rectangulos2 + 
+  geom_point(
+    data = clusters2, 
+    aes(x = lengthmax, y = ymax), 
+    color = "red", size = 3, alpha = 0.9
+  )
+
+graf2
+
+ggplotly(graf2)
+```
+
+```{r}
+indice2 <- spatgeom(y=data.cmasr1$Y.cmasr, x=data.cmasr1[,-5]) 
+plot_curve(indice2, type = "curve")
+plot_curve(indice2, type = "deriv")
+```
+
+Se repite lo anterior, pero ahora usando centros menos rangos.
+
+```{r}
+modelo.cmenosr <- lm(Pulse ~., data.cmenosr)
+```
+
+El modelo es $Y=32.6549+0.1821X_{1}+0.2440X_{2}-2.0934X_{3}+2913X_{4}$
+
+```{r}
+Y.cmenosr <- modelo.cmenosr$fitted.values 
+```
+
+```{r}
+data.cmenosr1 <- cbind(data.cmenosr[,-1],Y.cmenosr)
+ggplot(data.cmenosr1, aes(x = Syst, y = Y.cmenosr))+geom_point()+labs(title = " Syst vs. Y") 
+```
+
+```{r}
+modelo3 <- sym.lm(Pulse ~ ., sym.data = cardiologicalv2, method = "crm") 
+ypred3 <- sym.predict(modelo3, cardiologicalv2)
+
+clusters3 <- cbind(length1,ypred3$Fitted)
+colnames(clusters3) <- c('lengthmin','lengthmax','ymin','ymax')
+
+rectangulos3 <- ggplot() + geom_rect(data = clusters3,
+    aes(xmin = lengthmin, xmax = lengthmax, ymin = ymin, ymax = ymax),
+    fill = "blue", alpha = 0.1, color = "black"
+  ) +
+  labs(
+    title = "Agrupación rectangular",
+    x = "Syst",
+    y = "Y"
+  ) +
+  theme_minimal()
+
+graf3 <- rectangulos3 + 
+  geom_point(data = clusters3, 
+    aes(x = lengthmin, y = ymin), 
+    color = "green", size = 3, alpha = 0.9
+  )
+
+graf3
+
+ggplotly(graf3)
+```
+
+```{r}
+indice3 <- spatgeom(y=data.cmenosr1$Y.cmenosr, x=data.cmenosr1[,-5]) 
+plot_curve(indice3, type = "curve")
+plot_curve(indice3, type = "deriv")
+```
+
+### Gráfica final para la variable Syst con el método de centros y rangos.
+
+```{r}
+geom_indicesc <- indice1$results[[1]]$geom_indices #centros
+
+geom_indicescmasr <- indice2$results[[1]]$geom_indices #centrosmasrangos
+geom_indicescmasr1 <- geom_indicescmasr %>% group_by(alpha) %>% filter(geom_corr==max(geom_corr)) %>% ungroup() #Selección de los valores únicos de alpha, considerando el mínimo valor asociado en geom_corr
+ggplot(geom_indicescmasr1, aes(x=alpha,y=geom_corr))+geom_point()
+
+geom_indicescmenosr <- indice3$results[[1]]$geom_indices #centrosmenosrangos
+geom_indicescmenosr1 <- geom_indicescmenosr %>% group_by(alpha) %>% filter(geom_corr==max(geom_corr)) %>% ungroup() #Selección de los valores únicos de alpha, considerando el máximo valor asociado en geom_corr
+ggplot(geom_indicescmenosr1, aes(x=alpha,y=geom_corr))+geom_point()
+
+geom_indicesc$label <- "centers"
+geom_indicescmasr$label <- "centers plus ranges"
+geom_indicescmenosr$label <- "centers minus ranges"
+
+
+data_combined <- rbind(geom_indicesc,geom_indicescmasr, geom_indicescmenosr )
+data_combined1 <- rbind(geom_indicescmasr1, geom_indicescmenosr1)
+
+# Crear el gráfico
+ggplotly(ggplot(data_combined, aes(x = alpha, y = geom_corr, color = label)) +
+  geom_step(size = 1) +
+  labs(
+    title = "",
+    x = "Alpha",
+    y = "Geom_corr",
+    color = "Curve"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom"))
+```
+
+*Nota.* En los casos en que alpha no cambia, para la curva centros menos rangos se debe utilizar el máximo valor de y, mientras que para la curva centros más rangos, se utilizará centros menos rangos. Todo esto para calcular la integral. 
+
+```{r}
+library(pracma)
+
+alpha.vals <- sort(unique(c(geom_indicescmasr1$alpha, geom_indicescmenosr1$alpha)))
+
+geom_corr.cmasr <- approx(geom_indicescmasr1$alpha, geom_indicescmasr1$geom_corr, xout = alpha.vals, rule = 2)$y
+geom_corr.cmenosr <- approx(geom_indicescmenosr1$alpha, geom_indicescmenosr1$geom_corr, xout = alpha.vals, rule = 2)$y
+diff.geom_corr <- geom_corr.cmasr - geom_corr.cmenosr
+
+table.cmasr <- cbind(alpha.vals, geom_corr.cmasr)
+#ggplot(table.cmasr, aes(x=alpha.vals, geom_corr.cmasr))+geom_point()
+table.cmenosr <- cbind(alpha.vals, geom_corr.cmenosr)
+#ggplot(table.cmenosr, aes(x=alpha.vals, geom_corr.cmenosr))+geom_point()
+table.diff <- cbind(alpha.vals, diff.geom_corr)
+#ggplot(table.diff, aes(x=alpha.vals, diff.geom_corr))+geom_point()
+
+area.acumulada <- cumsum(c(0, diff.geom_corr[-1] * diff(alpha.vals)))
+area.acumulada
+
+data.acumulada <- data.frame(alpha = alpha.vals, area = area.acumulada)
+data.acumulada
+
+p <- ggplot(data.acumulada, aes(x = alpha, y = area.acumulada)) +
+  geom_line(size = 1, color = "blue") +
+  labs(
+    title = "Área Acumulada entre las Curvas",
+    x = "Alpha",
+    y = "Área Acumulada"
+  ) +
+  theme_minimal()
+
+ggplotly(p)
+
+#Derivada.
+
+tasa.cambio <- diff(area.acumulada) / diff(alpha.vals)
+alpha.medios <- (alpha.vals[-1] + alpha.vals[-length(alpha.vals)])/2
+data.derivada <- data.frame(alpha = alpha.medios, tasadecambio = tasa.cambio)
+
+p.derivada <- ggplot(data.derivada, aes(x = alpha, y = tasa.cambio)) +
+  geom_line(size = 1, color = "red") +
+  labs(
+    title = "Tasa de Cambio de la Función Acumulada",
+    x = "Alpha",
+    y = "Derivada (Tasa de Cambio)"
+  ) +
+  theme_minimal()
+
+ggplotly(p.derivada)
+```
+
+
+
+Probar modelos teóricos, datos de tipo intervalo que sigan cierto tipo de distribución o modelos Doughnout por ejemplo.
+
+Idea: análisis de datos complejos
+
+Idea: bondad de ajuste geométrica para datos de tipo histograma
+
+En 0.7 se intersecan las curvas de pérdida
+
+Buscar un mejor representante en vez del centro, no siempre el centro es el mejor representante.
+
+Workshop PaCMAP.
+
+Combinar PaCMAP con el índice propuesto, separar clusters y buscar el mejor representante por cluster.
+
+El objetivo final es devolver una correlación geométrica en intervalo.
+
+Calcular áreas entre curvas entre mayor es el área entre las curvas entonces más agrupados están los rectángulos (gráficamente uno se puede hacer una idea de la contribución por variable con este valor y con la gráfica de las funciones de pérdida).
+
+Sería importante calcular el valor del área bajo la curva para cada alpha. Hay un alpha ideal que aparece en la función spatgeom.
+
+```{r}
+# Optimización por varianza.
+opti.varianza <- function (sym.data, num.dimension) 
+{
+  N <- sym.data$N
+  M <- sym.data$M
+  num.dimen.aux <- num.dimension
+  seq.min <- seq(from = 1, by = 2, length.out = M)
+  seq.max <- seq(from = 2, by = 2, length.out = M)
+  sym.var.names <- sym.data$sym.var.names
+  sym.data.vertex <- vertex.interval.new.j(sym.data)
+  sym.data.vertex.matrix <- sym.data.vertex$vertex
+  dim.vertex <- dim(sym.data.vertex.matrix)[1]
+  tot.individuals <- N + dim.vertex
+  min.interval <- as.vector(as.matrix(sym.data$data[, seq.min]))
+  max.interval <- as.vector(as.matrix(sym.data$data[, seq.max]))
+  res.min <- nloptr::lbfgs(min.interval, pca.supplementary.vertex.lambda.fun.j, 
+    lower = min.interval, upper = max.interval, nl.info = FALSE, 
+    control = list(xtol_rel = 1e-08, maxeval = 20000), N = N, 
+    M = M, sym.var.names = sym.var.names, sym.data.vertex.matrix = sym.data.vertex.matrix, 
+    tot.individuals = tot.individuals, num.dimen.aux = num.dimen.aux)
+  M.x <- matrix(res.min$par, nrow = N)
+  colnames(M.x) <- sym.var.names
+  M.x <- scale(M.x)
+  mean.var <- attr(M.x, "scaled:center")
+  desv.var <- attr(M.x, "scaled:scale")
+  sym.data.vertex.matrix.cent <- sym.data.vertex.matrix
+  for (i in 1:M) {
+    sym.data.vertex.matrix.cent[, i] <- (sym.data.vertex.matrix.cent[, 
+      i] - mean.var[i])/desv.var[i]
+  }
+  M.x <- rbind(M.x, sym.data.vertex.matrix.cent)
+  pca.max <- PCA(X = M.x, scale.unit = FALSE, ind.sup = (N + 
+    1):tot.individuals, ncp = M, graph = FALSE)
+  pca.min.sym <- sym.interval.pca.limits.new.j(sym.data, pca.max$ind.sup$coord, 
+    sym.data.vertex$num.vertex)
+  return(list(Sym.Components = pca.min.sym, pca.min = pca.max, 
+    res.max = res.min))
+}
+```
+
+```{r}
+# Optimización por distancia.
+opti.distance <-  function (sym.data) 
+{
+  N <- sym.data$N
+  M <- sym.data$M
+  seq.min <- seq(from = 1, by = 2, length.out = M)
+  seq.max <- seq(from = 2, by = 2, length.out = M)
+  sym.var.names <- sym.data$sym.var.names
+  sym.data.vertex <- vertex.interval.new.j(sym.data)
+  sym.data.vertex.matrix <- sym.data.vertex$vertex
+  dim.vertex <- dim(sym.data.vertex.matrix)[1]
+  tot.individuals <- N + dim.vertex
+  min.interval <- as.vector(as.matrix(sym.data$data[, seq.min]))
+  max.interval <- as.vector(as.matrix(sym.data$data[, seq.max]))
+  init.point <- as.vector(as.matrix(centers.interval.j(sym.data)$centers))
+  res.min <- nloptr::lbfgs(init.point, pca.supplementary.vertex.fun.j, 
+    lower = min.interval, upper = max.interval, nl.info = FALSE, 
+    control = list(xtol_rel = 1e-08, maxeval = 20000), N = N, 
+    M = M, sym.var.names = sym.var.names, sym.data.vertex.matrix = sym.data.vertex.matrix, 
+    tot.individuals = tot.individuals)
+  M.x <- matrix(res.min$par, nrow = N)
+  colnames(M.x) <- sym.var.names
+  M.x <- scale(M.x)
+  mean.var <- attr(M.x, "scaled:center")
+  desv.var <- attr(M.x, "scaled:scale")
+  sym.data.vertex.matrix.cent <- sym.data.vertex.matrix
+  for (i in 1:M) {
+    sym.data.vertex.matrix.cent[, i] <- (sym.data.vertex.matrix.cent[, 
+      i] - mean.var[i])/desv.var[i]
+  }
+  M.x <- rbind(M.x, sym.data.vertex.matrix.cent)
+  pca.min <- FactoMineR::PCA(X = M.x, scale.unit = FALSE, 
+    ind.sup = (N + 1):tot.individuals, ncp = M, graph = FALSE)
+  pca.min.sym <- sym.interval.pca.limits.new.j(sym.data, pca.min$ind.sup$coord, 
+    sym.data.vertex$num.vertex)
+  return(list(Sym.Components = pca.min.sym, pca.min = pca.min, 
+    res.min = res.min))
+}
+```
+
+## Primer intento, Método Best Point.
+
+Primero, se tiene una tabla de datos simbólica de tipo intervalo, por ejemplo *abalone* de RSDA.
+Se obtiene la matriz de vértices asociada.
+
+```{r}
+library(RSDA)
+datos <- abalone
+#Número de vértices de la tabla abalone:
+nv <- (2^{dim(datos)[2]})*dim(datos)[1] #3072
+
+#RSDA:::sym.umap.symbolic_tbl() 
+#RSDA:::expand_rows
+
+vertex <- function(df){
+  l <- lapply(seq_len(ncol(df)), function(x) list(1, 2))
+  df_i <- expand.grid(l)
+  funs <- list(min, max)
+  funs <- lapply(df_i, function(i) funs[unlist(i)])
+  out <- lapply(seq_len(nrow(df)), function(i) {
+    fila <- df[i, ]
+    out <- lapply(seq_along(funs), function(i) {
+      unlist(lapply(funs[[i]], function(.f) .f(fila[[i]])))
+    })
+    out <- as.data.frame(do.call(cbind.data.frame, out))
+    colnames(out) <- colnames(df)
+    return(out)
+  })
+  out <- as.data.frame(do.call(rbind.data.frame, out))
+  colnames(out) <- colnames(df)
+  return(out)
+} #Esta es la funcióne expand_rows del código base de sym.umap
+
+datos.v <- vertex(datos)
+datos.v <- round(datos.v, 2)
+
+#Qué pasa si aplico un modelo de regresión para los vértices
+```
+
+```{r}
+modelo.vertices <- lm(WHOLE_WEIGHT ~., datos.v)
+Y.v <- modelo.vertices$fitted.values 
+Y.v <- round(Y.c,2)
+```
+
+Para la variable *LENGTH*, se tiene la nube de puntos:
+
+```{r}
+#datos.v1 <- cbind(datos.v[,-4],Y.v) 
+```
+
+```{r}
+#indice1 <- spatgeom(y=datos.v1$Y.v, x=datos.v1[,-7])
+#plot_curve(indice1, type = "curve")
+#plot_curve(indice1, type = "deriv")
+```
+
